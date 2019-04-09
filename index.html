@@ -4,6 +4,7 @@
 
 <html>
     <head>
+        <meta charset="utf-8"/>
         <title>Drocsid</title>
         <style>
 /* Set default font */
@@ -70,12 +71,13 @@ html, body {
     margin-left: auto;
     margin-right: auto;
     border: 1px solid black;
+    box-shadow: 0px 0px 8px #888;
     background-color: white;
     display: none;
 }
 
 /* Tree list elements */
-ul { padding-left: 24px; }
+ul { padding-left: 24px; white-space: nowrap; }
 li.collapsed { list-style: url('https://www.iconfinder.com/icons/183260/download/png/16'); }
 li.expanded  { list-style: url('https://www.iconfinder.com/icons/183258/download/png/16'); }
 li.leaf      { list-style: none; }
@@ -121,12 +123,12 @@ td.content {
                 <div class="flexbox" style="padding-top:32px;padding-bottom:50px">
                     <div class="top-panel" style="height:32px" id="idChannelHeader"></div>
                     <div class="scrollbox" style="padding:2px">
-                        <table id="idMessageList" style="border-collapse:collapse"></table>
+                        <table id="idMessageList" style="border-collapse:collapse;width:100%"></table>
                     </div>
                     <div class="bottom-panel" style="height:50px">
                         <div class="flexbox" style="padding-right:80px">
                             <textarea id="idMessageBox" style="width:100%;height:48px;padding:8px"></textarea>
-                            <button class="right-panel" style="width:80px" id="idSendBtn">Send</button>
+                            <button class="right-panel" style="width:80px" id="idSendBtn" onclick="sendMessage()">Send</button>
                         </div>
                     </div>
                 </div>
@@ -203,6 +205,27 @@ function escapeHtml(str)
                          .replace(/'/g, '&#039');
 }
 
+// Performs a GET request and returns the XMLHttpRequest object
+function httpGet(url, tokenRequired)
+{
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, false);
+    if (tokenRequired)
+        xhr.setRequestHeader('Authorization', userToken);
+    xhr.send();
+    return xhr;
+}
+
+function httpPost(url, body, tokenRequired)
+{
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', url, false);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    if (tokenRequired)
+        xhr.setRequestHeader('Authorization', userToken);
+    xhr.send(body);
+    return xhr;
+}
 
 // Sends login credentials to Discord to obtain user token
 function submitLogin()
@@ -216,10 +239,7 @@ function submitLogin()
     idEmailError.innerHTML = null;
     idPasswordError.innerHTML = null;
 
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', DISCORD_API_BASE_URL + '/auth/login', false);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.send(JSON.stringify(payload));
+    var xhr = httpPost(DISCORD_API_BASE_URL + '/auth/login', JSON.stringify(payload));
     response = JSON.parse(xhr.responseText);
     if (xhr.status == 200)
     {
@@ -234,6 +254,39 @@ function submitLogin()
     {
         idEmailError.innerHTML = escapeHtml(response.email);
         idPasswordError.innerHTML = escapeHtml(response.password);
+    }
+}
+
+function logOut()
+{
+    ws.close();
+    apiToken = null;
+    idLogOutBtn.style.display = 'none';
+    idLogInBtn.style.display = '';
+    idChannelList.innerHTML = '';
+    idMessageList.innerHTML = '';
+    idChannelHeader.innerHTML = '';
+}
+
+function sendMessage()
+{
+    var payload = {'content' : idMessageBox.value};
+    var xhr = httpPost(
+        DISCORD_API_BASE_URL + '/channels/' + currentChannel.id + '/messages',
+        JSON.stringify(payload),
+        true
+    );
+    switch (xhr.status)
+    {
+    case 200:
+        idMessageBox.value = null;
+        break;
+    case 403:
+        alert('You do not have permission to post messages in #' + currentChannel.name);
+        break;
+    default:
+        alert('Error ' + xhr.status);
+        break;
     }
 }
 
@@ -328,16 +381,13 @@ function openChannel(channelId)
     }
 
     // Load messages
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', DISCORD_API_BASE_URL + '/channels/' + channelId + '/messages', false);
-    xhr.setRequestHeader('Authorization', userToken);
-    xhr.send();
+    var xhr = httpGet(DISCORD_API_BASE_URL + '/channels/' + channelId + '/messages', true);
     switch (xhr.status)
     {
     case 200:
         break;
     case 403:
-        alert('You do not have permission to view ' + channel.name);
+        alert('You do not have permission to view #' + channel.name);
         return;
     default:
         alert('Error ' + xhr.status);
@@ -400,9 +450,7 @@ function populateChannelList()
 function initConnection()
 {
     // Get gateway url
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', DISCORD_API_BASE_URL + '/gateway', false);
-    xhr.send();
+    var xhr = httpGet(DISCORD_API_BASE_URL + '/gateway');
     if (xhr.status != 200)
     {
         alert('Failed to obtain gateway URL.');

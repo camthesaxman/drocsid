@@ -247,6 +247,11 @@ function httpPost(url, body, tokenRequired)
 // Sends login credentials to Discord to obtain user token
 function submitLogin()
 {
+    // For some strange reason, using the ID as a variable here doesn't work on Internet Explorer.
+    // I have to use document.getElementById instead.
+    var idEmailInput = document.getElementById('idEmailInput');
+    var idPasswordInput = document.getElementById('idPasswordInput');
+
     var payload = {
         'email' : idEmailInput.value,
         'password' : idPasswordInput.value

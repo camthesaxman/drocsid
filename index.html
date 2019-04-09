@@ -11,6 +11,7 @@
 body {
     font-family: sans-serif;
     font-size: 16px;
+    background-color: #CCD;
 }
 
 html, body {
@@ -53,6 +54,7 @@ html, body {
     height: 100%;
     overflow: auto;
     border: 1px solid black;
+    background-color: #FFF;
 }
 
 /* An invisible box that covers the screen, blocking user input */
@@ -90,7 +92,7 @@ tr.message {
 }
 td.timestamp {
     width: 80px;
-    color: #CCC;
+    color: #888;
     font-size: 8px;
 }
 td.username {
@@ -124,13 +126,16 @@ img.attachment, video.attachment {
             <!-- Toolbar -->
             <div class="top-panel" style="height:32px;padding:2px;border-bottom:1px solid black">
                 <button id="idLogInBtn" onclick="openPopup('idLoginDlg')">Log In</button>
-                <button id="idLogOutBtn" onclick="logOut()" style="display:none">Log Out</button>
+                <span id="idSessionControls" style="display:none">
+                    <span id="idUsername" style="font-weight:bold"></span>
+                    <button onclick="logOut()">Log Out</button>
+                </span>
             </div>
 
             <div class="flexbox" style="padding-left:200px">
 
                 <!-- Channel List -->
-                <div class="left-panel" style="width:200px;padding:2px">
+                <div class="left-panel" style="width:200px;padding:4px">
                     <div class="scrollbox">
                         <ul id="idChannelList">
                     </div>
@@ -138,14 +143,14 @@ img.attachment, video.attachment {
 
                 <!-- Message Area -->
                 <div class="flexbox" style="padding-top:32px;padding-bottom:50px">
-                    <div class="top-panel" style="height:32px" id="idChannelHeader"></div>
-                    <div class="scrollbox" style="padding:2px">
+                    <div class="top-panel" style="height:32px;font-weight:bold" id="idChannelHeader"></div>
+                    <div class="scrollbox">
                         <button id="idLoadMsgsBtn" onclick="loadMoreMessages()" style="width:100%;display:none">Load more messages</button>
                         <table id="idMessageList" style="border-collapse:collapse;width:100%"></table>
                     </div>
-                    <div class="bottom-panel" style="height:50px">
+                    <div class="bottom-panel" style="height:50px;padding-top:4px;padding-bottom:4px">
                         <div class="flexbox" style="padding-right:80px">
-                            <textarea id="idMessageBox" style="width:100%;height:48px;padding:8px"></textarea>
+                            <textarea id="idMessageBox" style="width:100%;height:42px;margin:0px"></textarea>
                             <button class="right-panel" style="width:80px" id="idSendBtn" onclick="sendMessage()">Send</button>
                         </div>
                     </div>
@@ -160,11 +165,11 @@ img.attachment, video.attachment {
                 <h2>Log in to Discord</h2>
                 <hr>
                 <form onsubmit="submitLogin();return false">
-                    <table>
+                    <table style="width:100%">
                         <tbody>
                             <tr>
                                 <td>Email:</td>
-                                <td><input id="idEmailInput"></td>
+                                <td><input id="idEmailInput" style="width:100%"></td>
                             </tr>
                             <tr>
                                 <td></td>
@@ -172,7 +177,7 @@ img.attachment, video.attachment {
                             </tr>
                             <tr>
                                 <td>Password:</td>
-                                <td><input id="idPasswordInput" type="password"></td>
+                                <td><input id="idPasswordInput" type="password" style="width:100%"></td>
                             </tr>
                             <tr>
                                 <td></td>
@@ -269,7 +274,7 @@ function submitLogin()
         // Successful
         userToken = response.token;
         idLogInBtn.style.display = 'none';
-        idLogOutBtn.style.display = '';
+        idSessionControls.style.display = '';
         closePopup('idLoginDlg');
         initConnection();
     }
@@ -284,7 +289,7 @@ function logOut()
 {
     ws.close();
     apiToken = null;
-    idLogOutBtn.style.display = 'none';
+    idSessionControls.style.display = 'none';
     idLogInBtn.style.display = '';
     idChannelList.innerHTML = '';
     idMessageList.innerHTML = '';
@@ -303,7 +308,7 @@ function sendMessage()
     switch (xhr.status)
     {
     case 200:
-        idMessageBox.value = null;
+        idMessageBox.value = '';
         break;
     case 403:
         alert('You do not have permission to post messages in #' + currentChannel.name);
@@ -377,6 +382,8 @@ function formatMessageContent(text)
                         if (input.charAt(pos + 1) == '@')
                         {
                             var start = pos + 2;
+                            if (input.charAt(start) == '!')  // TODO: display nickname
+                                start++;
                             var end_ = input.indexOf('>', start);
                             if (end_ != -1)
                             {
@@ -632,6 +639,7 @@ function initConnection()
             switch (payload.t)
             {
             case 'READY':
+                idUsername.innerHTML = escapeHtml(payload.d.user.username);
                 userGuilds = payload.d.guilds;
                 populateChannelList();
                 break;

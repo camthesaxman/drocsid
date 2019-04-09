@@ -140,6 +140,7 @@ img.attachment, video.attachment {
                 <div class="flexbox" style="padding-top:32px;padding-bottom:50px">
                     <div class="top-panel" style="height:32px" id="idChannelHeader"></div>
                     <div class="scrollbox" style="padding:2px">
+                        <button id="idLoadMsgsBtn" onclick="loadMoreMessages()" style="width:100%;display:none">Load more messages</button>
                         <table id="idMessageList" style="border-collapse:collapse;width:100%"></table>
                     </div>
                     <div class="bottom-panel" style="height:50px">
@@ -180,7 +181,7 @@ img.attachment, video.attachment {
                         </tbody>
                     </table>
                     <input id="idLoginSubmitBtn" type="submit" value="Log In">
-                    <button id="idLoginCancelBtn" onclick="closePopup('idLoginDlg')">Cancel</button>
+                    <button id="idLoginCancelBtn" onclick="closePopup('idLoginDlg');return false">Cancel</button>
                 </form>
             </div>
         </div>
@@ -288,6 +289,7 @@ function logOut()
     idChannelList.innerHTML = '';
     idMessageList.innerHTML = '';
     idChannelHeader.innerHTML = '';
+    idLoadMsgsBtn.style.display = 'none';
 }
 
 function sendMessage()
@@ -410,8 +412,8 @@ function formatMessageContent(text)
     return output;
 }
 
-// Adds the message to the channel's message list
-function displayMessage(message)
+// Creates a HTML table row for the message
+function createMessage(message)
 {
     function formatTimestamp(timestamp)
     {
@@ -431,6 +433,7 @@ function displayMessage(message)
 
     var messageElem = document.createElement('tr');
     messageElem.className = 'message';
+    messageElem.messageId = message.id;
 
     var timestampElem = document.createElement('td');
     timestampElem.className = 'timestamp';
@@ -472,7 +475,7 @@ function displayMessage(message)
             {
                 elem.innerHTML = escapeHtml(filename);
                 elem.href = message.attachments[i].url;
-                elem.createAttribute('download');
+                elem.download = '';
             }
             else  // Display an inline media element
             {
@@ -486,8 +489,44 @@ function displayMessage(message)
     messageElem.appendChild(timestampElem);
     messageElem.appendChild(userElem);
     messageElem.appendChild(contentElem);
-    idMessageList.appendChild(messageElem);
-    idMessageList.parentElement.scrollTop = idMessageList.parentElement.scrollHeight;
+
+    return messageElem;
+}
+
+// Called when the "Load more messages" button is clicked
+function loadMoreMessages()
+{
+    var first = idMessageList.firstChild.messageId;
+    loadMessages(first);
+}
+
+// Loads the 50 messages in the current channel before the specified message ID, or
+// the most recent 50 if no message ID is specified
+// returns true on success
+function loadMessages(messageId)
+{
+    var queryString = '';
+
+    if (messageId != null)
+        queryString = '?before=' + messageId;
+    // Load messages
+    var xhr = httpGet(DISCORD_API_BASE_URL + '/channels/' + currentChannel.id + '/messages' + queryString, true);
+    switch (xhr.status)
+    {
+    case 200:
+        break;
+    case 403:
+        alert('You do not have permission to view #' + currentChannel.name);
+        return false;
+    default:
+        alert('Error ' + xhr.status);
+        return false;
+    }
+
+    var messages = JSON.parse(xhr.responseText);
+    for (var i = 0; i < messages.length; i++)
+        idMessageList.insertBefore(createMessage(messages[i]), idMessageList.firstChild);
+    return true;
 }
 
 // Loads the specified channel and displays its messages
@@ -511,26 +550,12 @@ function openChannel(channelId)
             break;
     }
 
-    // Load messages
-    var xhr = httpGet(DISCORD_API_BASE_URL + '/channels/' + channelId + '/messages', true);
-    switch (xhr.status)
-    {
-    case 200:
-        break;
-    case 403:
-        alert('You do not have permission to view #' + channel.name);
-        return;
-    default:
-        alert('Error ' + xhr.status);
-        return;
-    }
-
-    currentChannel = channel;
     idChannelHeader.innerHTML = escapeHtml(guild.name) + ' / #' + escapeHtml(channel.name);
     idMessageList.innerHTML = '';
-    var messages = JSON.parse(xhr.responseText);
-    for (var i = messages.length - 1; i >= 0; i--)
-        displayMessage(messages[i]);
+    idLoadMsgsBtn.style.display = '';
+    currentChannel = channel;
+    loadMessages();
+    idMessageList.parentElement.scrollTop = idMessageList.parentElement.scrollHeight;
 }
 
 function populateChannelList()
@@ -580,6 +605,8 @@ function populateChannelList()
 // Starts the websocket connection
 function initConnection()
 {
+    var heartbeat = null;
+
     // Get gateway url
     var xhr = httpGet(DISCORD_API_BASE_URL + '/gateway');
     if (xhr.status != 200)
@@ -609,8 +636,11 @@ function initConnection()
                 populateChannelList();
                 break;
             case 'MESSAGE_CREATE':
-                if (payload.d.channel_id == currentChannel.id)
-                    displayMessage(payload.d);
+                if (currentChannel != null && payload.d.channel_id == currentChannel.id)
+                {
+                    idMessageList.appendChild(createMessage(payload.d));
+                    idMessageList.parentElement.scrollTop = idMessageList.parentElement.scrollHeight;
+                }
                 break;
             }
             break;
@@ -654,6 +684,7 @@ function initConnection()
     ws.onerror = function() { console.log('WS ERROR'); };
     ws.onclose = function(e)
     {
+        window.clearInterval(heartbeat);  // stop heartbeat
         console.log('WS CLOSE: ' + e.code + ' ' + e.reason);
         alert('Socket Closed\ncode ' + e.code + '\nreason ' + e.reason);
     };

@@ -99,6 +99,23 @@ td.username {
 td.content {
     white-space: pre-wrap;
 }
+code {
+    background-color: #CCC;
+}
+code.block {
+    display: block;
+    border: 1px solid #888;
+}
+span.mention {
+    color: blue;
+    background-color: #CCF;
+}
+.attachment {
+    display: block;
+}
+img.attachment, video.attachment {
+    width: 200px;
+}
         </style>
     </head>
     <body>
@@ -290,33 +307,103 @@ function sendMessage()
     }
 }
 
-/*
-// Returns the guild object with the specified ID
-function getGuildById(guildId)
+// Parses message content and returns the HTML formatted version
+function formatMessageContent(text)
 {
-    for (var i = 0; i < userGuilds.length; i++)
+    function formatMsgRecursive(input, pos, end, startTag, endTag, output)
     {
-        if (userGuilds[i].id == guildId)
-            return userGuilds[i];
-    }
-    return null;
-}
-
-// Returns the channel object with the specified ID
-function getChannelById(channelId)
-{
-    for (var i = 0; i < userGuilds.length; i++)
-    {
-        var channels = userGuilds[i].channels;
-        for (var j = 0; j < channels.length; j++)
+        function escapeHtmlChar(c)
         {
-            if (channels[j].id == channelId)
-                return channels[j];
+            switch (c)
+            {
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '&': return '&amp;';
+            default: return c;
+            }
         }
+
+        var content = [''];
+
+        while (pos < input.length)
+        {
+            if (end != null && input.substring(pos, pos + end.length) == end)
+            {
+                output[0] += startTag + content[0] + endTag;
+                return pos + end.length;
+            }
+            else
+            {
+                var formatted = false;
+
+                if (end != '`' && end != '```')  // only format when not inside of a code block
+                {
+                    // Is it the start of a formatter?
+                    switch (input.charAt(pos))
+                    {
+                    case '_':
+                        pos = formatMsgRecursive(input, pos + 1, '_', '<em>', '</em>', content);
+                        formatted = true;
+                        break;
+                    case '*':
+                        if (input.charAt(pos + 1) == '*')
+                            pos = formatMsgRecursive(input, pos + 2, '**', '<b>', '</b>', content);
+                        else
+                            pos = formatMsgRecursive(input, pos + 1, '*', '<em>', '</em>', content);
+                        formatted = true;
+                        break;
+                    case '~':
+                        if (input.charAt(pos + 1) == '~')
+                        {
+                            pos = formatMsgRecursive(input, pos + 2, '~~', '<s>', '</s>', content);
+                            formatted = true;
+                        }
+                        break;
+                    case '`':
+                        if (input.charAt(pos + 1) == '`' && input.charAt(pos + 2) == '`')
+                            pos = formatMsgRecursive(input, pos + 3, '```', '<code class="block">', '</code>', content);
+                        else
+                            pos = formatMsgRecursive(input, pos + 1, '`', '<code>', '</code>', content);
+                        formatted = true;
+                        break;
+                    case '<':
+                        if (input.charAt(pos + 1) == '@')
+                        {
+                            var start = pos + 2;
+                            var end_ = input.indexOf('>', start);
+                            if (end_ != -1)
+                            {
+                                var id = input.substring(start, end_);
+                                var xhr = httpGet(DISCORD_API_BASE_URL + '/users/' + id, true);
+                                var user = JSON.parse(xhr.responseText);
+                                if (user != null && user.username != null)
+                                {
+                                    content[0] += '<span class="mention">@' + user.username + '</span>';
+                                    pos = end_ + 1;
+                                    formatted = true;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                if (!formatted)
+                {
+                    content[0] += escapeHtmlChar(input.charAt(pos));
+                    pos++;
+                }
+            }
+        }
+
+        output[0] += (end == null ? '' : end) + content[0];
+        return pos;
     }
-    return null;
+
+    var output = [''];
+
+    formatMsgRecursive(text, 0, null, null, null, output);
+    return output;
 }
-*/
 
 // Adds the message to the channel's message list
 function displayMessage(message)
@@ -350,7 +437,46 @@ function displayMessage(message)
 
     var contentElem = document.createElement('td');
     contentElem.className = 'content';
-    contentElem.innerHTML = escapeHtml(message.content);
+    contentElem.innerHTML = formatMessageContent(message.content);
+
+    // Display attachments
+    if (message.attachments != null)
+    {
+        for (var i = 0; i < message.attachments.length; i++)
+        {
+            var tagName = 'a';
+            var filename = message.attachments[i].filename;
+            var nameAndExt = filename.split('.');
+            var ext = nameAndExt[nameAndExt.length - 1]
+
+            switch (ext)
+            {
+            case 'png':
+            case 'jpg':
+            case 'gif':
+                tagName = 'img';
+                break;
+            case 'mp4':
+            case 'webm':
+                tagName = 'video';
+                break;
+            }
+
+            var elem = document.createElement(tagName);
+            if (tagName == 'a')  // Unknown type - make a download link
+            {
+                elem.innerHTML = escapeHtml(filename);
+                elem.href = message.attachments[i].url;
+                elem.createAttribute('download');
+            }
+            else  // Display an inline media element
+            {
+                elem.src = message.attachments[i].url;
+            }
+            elem.className = 'attachment';
+            contentElem.appendChild(elem);
+        }
+    }
 
     messageElem.appendChild(timestampElem);
     messageElem.appendChild(userElem);

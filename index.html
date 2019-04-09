@@ -1,1 +1,485 @@
-Hello World!
+<!DOCTYPE html>
+
+<!-- Drocsid, a simple (text-only) Discord client -->
+
+<html>
+    <head>
+        <title>Drocsid</title>
+        <style>
+/* Set default font */
+body {
+    font-family: sans-serif;
+    font-size: 16px;
+}
+
+html, body {
+    margin: 0px;
+    width: 100%;
+    height: 100%;
+}
+* {
+    box-sizing: border-box;
+}
+
+
+/*** Basic layout containers ***/
+
+/* Flexbox
+ * A box that takes up the entire content area of its parent
+ * Padding must be set to account for any child panels.
+ */
+.flexbox {
+    position: relative;  /* uses the content area of its parent as the containing block */
+    width: 100%;
+    height: 100%;
+}
+
+/* Panels
+ * A box that sticks to one side of its parent.
+ * Set the padding of the parent so that the panel resides inside the parent's padding area,
+ * but outside of the parent's content area.
+ */
+.top-panel    { position: absolute; width:  100%; top:    0px; left: 0px; }
+.bottom-panel { position: absolute; width:  100%; bottom: 0px; left: 0px; }
+.left-panel   { position: absolute; height: 100%; left:   0px; top:  0px; }
+.right-panel  { position: absolute; height: 100%; right:  0px; top:  0px; }
+
+/* Scrollbox
+ * A box that takes up the entire content area of its parent, but scrolls its child elements
+ */
+.scrollbox {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    border: 1px solid black;
+}
+
+/* An invisible box that covers the screen, blocking user input */
+#idModalContainer {
+    position: fixed;
+    left: 0px;
+    top: 0px;
+    width: 100%;
+    height: 100%;
+    display: none;
+}
+
+.popup {
+    padding: 10px;
+    width: 300px;
+    margin-left: auto;
+    margin-right: auto;
+    border: 1px solid black;
+    background-color: white;
+    display: none;
+}
+
+/* Tree list elements */
+ul { padding-left: 24px; }
+li.collapsed { list-style: url('https://www.iconfinder.com/icons/183260/download/png/16'); }
+li.expanded  { list-style: url('https://www.iconfinder.com/icons/183258/download/png/16'); }
+li.leaf      { list-style: none; }
+li.collapsed ul { display: none; }
+
+/* Message styles */
+tr.message {
+    border-top: 1px solid #CCC;
+    vertical-align: top;
+}
+td.timestamp {
+    width: 80px;
+    color: #CCC;
+    font-size: 8px;
+}
+td.username {
+    font-weight: bold;
+}
+td.content {
+    white-space: pre-wrap;
+}
+        </style>
+    </head>
+    <body>
+        <div class="flexbox" style="padding-top:32px">
+
+            <!-- Toolbar -->
+            <div class="top-panel" style="height:32px;padding:2px;border-bottom:1px solid black">
+                <button id="idLogInBtn" onclick="openPopup('idLoginDlg')">Log In</button>
+                <button id="idLogOutBtn" onclick="logOut()" style="display:none">Log Out</button>
+            </div>
+
+            <div class="flexbox" style="padding-left:200px">
+
+                <!-- Channel List -->
+                <div class="left-panel" style="width:200px;padding:2px">
+                    <div class="scrollbox">
+                        <ul id="idChannelList">
+                    </div>
+                </div>
+
+                <!-- Message Area -->
+                <div class="flexbox" style="padding-top:32px;padding-bottom:50px">
+                    <div class="top-panel" style="height:32px" id="idChannelHeader"></div>
+                    <div class="scrollbox" style="padding:2px">
+                        <table id="idMessageList" style="border-collapse:collapse"></table>
+                    </div>
+                    <div class="bottom-panel" style="height:50px">
+                        <div class="flexbox" style="padding-right:80px">
+                            <textarea id="idMessageBox" style="width:100%;height:48px;padding:8px"></textarea>
+                            <button class="right-panel" style="width:80px" id="idSendBtn">Send</button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Login Dialog -->
+        <div id="idModalContainer">
+            <div id="idLoginDlg" class="popup">
+                <h2>Log in to Discord</h2>
+                <hr>
+                <form onsubmit="submitLogin();return false">
+                    <table>
+                        <tbody>
+                            <tr>
+                                <td>Email:</td>
+                                <td><input id="idEmailInput"></td>
+                            </tr>
+                            <tr>
+                                <td></td>
+                                <td id="idEmailError" style="color:red"></td>
+                            </tr>
+                            <tr>
+                                <td>Password:</td>
+                                <td><input id="idPasswordInput" type="password"></td>
+                            </tr>
+                            <tr>
+                                <td></td>
+                                <td id="idPasswordError" style="color:red"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <input id="idLoginSubmitBtn" type="submit" value="Log In">
+                    <button id="idLoginCancelBtn" onclick="closePopup('idLoginDlg')">Cancel</button>
+                </form>
+            </div>
+        </div>
+    </body>
+    <script>
+<!--
+
+var DISCORD_API_BASE_URL = "https://discordapp.com/api/v6";
+var DISCORD_WS_PORT = 443;  // port to use for websocket connections
+var userToken = null;
+var userGuilds = null;
+var currentChannel = null;
+
+// Opens a popup
+function openPopup(id)
+{
+    idModalContainer.style.display = 'block';
+    document.getElementById(id).style.display = 'block';
+}
+
+// Closes a popup
+function closePopup(id)
+{
+    idModalContainer.style.display = 'none';
+    document.getElementById(id).style.display = 'none';
+}
+
+
+// Escapes HTML characters in a string so that it can be
+// safely inserted as text into an element
+function escapeHtml(str)
+{
+    if (str == null)
+        return null;
+    return str.toString().replace(/&/g, '&amp;')
+                         .replace(/</g, '&lt;')
+                         .replace(/>/g, '&gt;')
+                         .replace(/"/g, '&quot;')
+                         .replace(/'/g, '&#039');
+}
+
+
+// Sends login credentials to Discord to obtain user token
+function submitLogin()
+{
+    var payload = {
+        'email' : idEmailInput.value,
+        'password' : idPasswordInput.value
+    };
+    var error = 'Unknown error.';
+
+    idEmailError.innerHTML = null;
+    idPasswordError.innerHTML = null;
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', DISCORD_API_BASE_URL + '/auth/login', false);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify(payload));
+    response = JSON.parse(xhr.responseText);
+    if (xhr.status == 200)
+    {
+        // Successful
+        userToken = response.token;
+        idLogInBtn.style.display = 'none';
+        idLogOutBtn.style.display = '';
+        closePopup('idLoginDlg');
+        initConnection();
+    }
+    else
+    {
+        idEmailError.innerHTML = escapeHtml(response.email);
+        idPasswordError.innerHTML = escapeHtml(response.password);
+    }
+}
+
+/*
+// Returns the guild object with the specified ID
+function getGuildById(guildId)
+{
+    for (var i = 0; i < userGuilds.length; i++)
+    {
+        if (userGuilds[i].id == guildId)
+            return userGuilds[i];
+    }
+    return null;
+}
+
+// Returns the channel object with the specified ID
+function getChannelById(channelId)
+{
+    for (var i = 0; i < userGuilds.length; i++)
+    {
+        var channels = userGuilds[i].channels;
+        for (var j = 0; j < channels.length; j++)
+        {
+            if (channels[j].id == channelId)
+                return channels[j];
+        }
+    }
+    return null;
+}
+*/
+
+// Adds the message to the channel's message list
+function displayMessage(message)
+{
+    function formatTimestamp(timestamp)
+    {
+        function pad(num, size)
+        {
+            var s = num + "";
+            while (s.length < size)
+                s = "0" + s;
+            return s;
+        }
+
+        var date = new Date(timestamp);
+        return date.getMonth() + 1 + '/' + date.getDate() + '/' +date.getFullYear()
+             + ' '
+             + pad(date.getHours(), 2) + ':' + pad(date.getMinutes(), 2);
+    }
+
+    var messageElem = document.createElement('tr');
+    messageElem.className = 'message';
+
+    var timestampElem = document.createElement('td');
+    timestampElem.className = 'timestamp';
+    timestampElem.innerHTML = formatTimestamp(message.timestamp);
+
+    var userElem = document.createElement('td');
+    userElem.className = 'username';
+    userElem.innerHTML = escapeHtml(message.author.username);
+
+    var contentElem = document.createElement('td');
+    contentElem.className = 'content';
+    contentElem.innerHTML = escapeHtml(message.content);
+
+    messageElem.appendChild(timestampElem);
+    messageElem.appendChild(userElem);
+    messageElem.appendChild(contentElem);
+    idMessageList.appendChild(messageElem);
+    idMessageList.parentElement.scrollTop = idMessageList.parentElement.scrollHeight;
+}
+
+// Loads the specified channel and displays its messages
+function openChannel(channelId)
+{
+    var channel = null;
+
+    // Find channel and its guild
+    for (var i = 0; i < userGuilds.length; i++)
+    {
+        var guild = userGuilds[i];
+        for (var j = 0; j < guild.channels.length; j++)
+        {
+            if (guild.channels[j].id == channelId)
+            {
+                channel = guild.channels[j];
+                break;
+            }
+        }
+        if (channel != null)
+            break;
+    }
+
+    // Load messages
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', DISCORD_API_BASE_URL + '/channels/' + channelId + '/messages', false);
+    xhr.setRequestHeader('Authorization', userToken);
+    xhr.send();
+    switch (xhr.status)
+    {
+    case 200:
+        break;
+    case 403:
+        alert('You do not have permission to view ' + channel.name);
+        return;
+    default:
+        alert('Error ' + xhr.status);
+        return;
+    }
+
+    currentChannel = channel;
+    idChannelHeader.innerHTML = escapeHtml(guild.name) + ' / #' + escapeHtml(channel.name);
+    idMessageList.innerHTML = '';
+    var messages = JSON.parse(xhr.responseText);
+    for (var i = messages.length - 1; i >= 0; i--)
+        displayMessage(messages[i]);
+}
+
+function populateChannelList()
+{
+    for (var i = 0; i < userGuilds.length; i++)
+    {
+        var guild = userGuilds[i];
+
+        var guildElem = document.createElement('li');
+        guildElem.className = 'collapsed';
+        guildElem.innerHTML = escapeHtml(guild.name);
+        // Toggle expanded/collapsed state when clicked
+        guildElem.onclick = function(e)
+        {
+            var elem = e.target;
+            var classMap = { 'expanded' : 'collapsed', 'collapsed' : 'expanded'};
+            if (elem != null && elem.nodeName == 'LI' && elem.className in classMap)
+                elem.className = classMap[elem.className];
+        };
+
+        var channelListElem = document.createElement('ul');
+
+        var channels = guild.channels.sort(function(a, b) { return a.name > b.name; });
+        for (var j = 0; j < channels.length; j++)
+        {
+            var channel = channels[j];
+            if (channel.type == 0)
+            {
+                var channelElem = document.createElement('li');
+                channelElem.className = 'leaf';
+                channelElem.innerHTML = '#' + escapeHtml(channel.name);
+                channelElem.channelId = channel.id;
+                channelElem.onclick = function(e)
+                {
+                    var elem = e.target;
+                    openChannel(elem.channelId);
+                };
+                channelListElem.appendChild(channelElem);
+            }
+        }
+
+        guildElem.appendChild(channelListElem);
+        idChannelList.appendChild(guildElem);
+    }
+}
+
+// Starts the websocket connection
+function initConnection()
+{
+    // Get gateway url
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', DISCORD_API_BASE_URL + '/gateway', false);
+    xhr.send();
+    if (xhr.status != 200)
+    {
+        alert('Failed to obtain gateway URL.');
+        return;
+    }
+    var gatewayUrl = JSON.parse(xhr.responseText).url;
+
+    console.log('gateway = ' + gatewayUrl);
+
+    // Open websocket
+    ws = new WebSocket(gatewayUrl, ['discord']);
+    ws.onopen = function() { console.log('WS OPEN'); };
+    ws.onmessage = function(e)
+    {
+        console.log('WS MESSAGE');
+        var payload = JSON.parse(e.data);
+        switch (payload.op)
+        {
+        case 0:  // Dispatch
+            console.log('>> DISPATCH');
+            switch (payload.t)
+            {
+            case 'READY':
+                userGuilds = payload.d.guilds;
+                populateChannelList();
+                break;
+            case 'MESSAGE_CREATE':
+                if (payload.d.channel_id == currentChannel.id)
+                    displayMessage(payload.d);
+                break;
+            }
+            break;
+        case 10:  // Hello
+            console.log('>> HELLO');
+            var heartbeatInterval = payload.d.heartbeat_interval;
+            console.log('interval = ' + heartbeatInterval);
+            window.setInterval(
+                function()
+                {
+                    console.log('<< HEARTBEAT');
+                    ws.send('{"op":1,"d":null}');
+                },
+                heartbeatInterval
+            );
+            // Send identity
+            var payload = {
+                'op' : 2,
+                'd' : {
+                    'token' : userToken,
+                    'properties' : {
+                        '$os' : 'linux',
+                        '$browser' : 'disco',
+                        '$device' : 'disco'
+                    },
+                    'compress' : 'false',
+                    'large_threshold' : '50'
+                }
+            };
+            console.log('<< IDENTIFY');
+            ws.send(JSON.stringify(payload));
+            break;
+        case 11:
+            console.log('>> ACK');
+            break;
+        default:
+            console.log('>> ' + payload.op);
+            break;
+        }
+    };
+    ws.onerror = function() { console.log('WS ERROR'); };
+    ws.onclose = function(e)
+    {
+        console.log('WS CLOSE: ' + e.code + ' ' + e.reason);
+        alert('Socket Closed\ncode ' + e.code + '\nreason ' + e.reason);
+    };
+}
+
+-->
+    </script>
+</html>

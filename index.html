@@ -194,10 +194,12 @@ img.attachment, video.attachment {
     <script>
 <!--
 
-var DISCORD_API_BASE_URL = "https://discordapp.com/api/v6";
+var DISCORD_API_BASE_URL = 'https://discordapp.com/api/v6';
+var DISCORD_CDN_URL = 'https://cdn.discordapp.com';
 var DISCORD_WS_PORT = 443;  // port to use for websocket connections
 var userToken = null;
 var userGuilds = null;
+var currentGuild = null;
 var currentChannel = null;
 
 // Opens a popup
@@ -250,6 +252,31 @@ function httpPost(url, body, tokenRequired)
     return xhr;
 }
 
+// Returns true if the string is a valid Discord ID
+function isValidId(str)
+{
+    // Must contain only digits
+    if (str.length == 0)
+        return false;
+    for (var i = 0; i < str.length; i++)
+    {
+        if ('0123456789'.indexOf(str.charAt(i)) == -1)
+            return false;
+    }
+    return true;
+}
+
+// Finds the object with the specified ID in the given array
+function findObjectWithId(array, id)
+{
+    for (var i = 0; i < array.length; i++)
+    {
+        if (array[i].id == id)
+            return array[i];
+    }
+    return null;
+}
+
 // Sends login credentials to Discord to obtain user token
 function submitLogin()
 {
@@ -262,10 +289,9 @@ function submitLogin()
         'email' : idEmailInput.value,
         'password' : idPasswordInput.value
     };
-    var error = 'Unknown error.';
 
-    idEmailError.innerHTML = null;
-    idPasswordError.innerHTML = null;
+    idEmailError.innerHTML = '';
+    idPasswordError.innerHTML = '';
 
     var xhr = httpPost(DISCORD_API_BASE_URL + '/auth/login', JSON.stringify(payload));
     response = JSON.parse(xhr.responseText);
@@ -289,6 +315,8 @@ function logOut()
 {
     ws.close();
     apiToken = null;
+    currentGuild = null;
+    currentChannel = null;
     idSessionControls.style.display = 'none';
     idLogInBtn.style.display = '';
     idChannelList.innerHTML = '';
@@ -320,8 +348,64 @@ function sendMessage()
 }
 
 // Parses message content and returns the HTML formatted version
-function formatMessageContent(text)
+function formatMessageContent(message, text)
 {
+    //console.log(JSON.stringify(message));
+
+    // formats a <> reference to a user, channel, role, or emoji.
+    // returns null if reference is not valid
+    function formatReference(str)
+    {
+        var type = str.charAt(0);
+        var id = null;
+        switch (type)
+        {
+        case '@':  // User or role
+            var subtype = str.charAt(1);
+            if (subtype == '!' || subtype == '&')
+                id = str.substring(2);
+            else
+                id = str.substring(1);
+            if (isValidId(id))
+            {
+                if (subtype == '&')  // role
+                {
+                    var role = findObjectWithId(currentGuild.roles, id);
+                    if (role != null)
+                        return '<span class="mention">@' + escapeHtml(role.name) + '</span>';
+                }
+                else  // user
+                {
+                    var user = findObjectWithId(message.mentions, id);
+                    if (user != null)
+                        return '<span class="mention">@' + escapeHtml(user.username) + '</span>';
+                }
+            }
+            break;
+        case '#':  // Channel
+            id = str.substring(1);
+            if (isValidId(id))
+            {
+                var channel = findObjectWithId(currentGuild.channels, id);
+                if (channel != null)
+                    return '<span class="mention">#' + escapeHtml(channel.name) + '</span>'
+            }
+            break;
+        case 'a':  // Custom Emoji (animated)
+            if (str.charAt(1) != ':')
+                return null;
+            // fall through
+        case ':':  // Custom Emoji
+            id = str.split(':')[2];
+            name = str.split(':')[1];
+            var ext = (type == 'a' ? '.gif' : '.png');
+            if (isValidId(id))
+                return '<img src="' + DISCORD_CDN_URL + '/emojis/' + id + ext + '?size=16" title="' + escapeHtml(name) + '"/>';
+            break;
+        }
+        return null;
+    }
+
     function formatMsgRecursive(input, pos, end, startTag, endTag, output)
     {
         function escapeHtmlChar(c)
@@ -379,24 +463,16 @@ function formatMessageContent(text)
                         formatted = true;
                         break;
                     case '<':
-                        if (input.charAt(pos + 1) == '@')
+                        // Handle <> references
+                        var end_ = input.indexOf('>', pos + 1);
+                        if (end_ == -1)
+                            break;
+                        var reference = formatReference(input.substring(pos + 1, end_));
+                        if (reference != null)
                         {
-                            var start = pos + 2;
-                            if (input.charAt(start) == '!')  // TODO: display nickname
-                                start++;
-                            var end_ = input.indexOf('>', start);
-                            if (end_ != -1)
-                            {
-                                var id = input.substring(start, end_);
-                                var xhr = httpGet(DISCORD_API_BASE_URL + '/users/' + id, true);
-                                var user = JSON.parse(xhr.responseText);
-                                if (user != null && user.username != null)
-                                {
-                                    content[0] += '<span class="mention">@' + user.username + '</span>';
-                                    pos = end_ + 1;
-                                    formatted = true;
-                                }
-                            }
+                            content[0] += reference;
+                            pos = end_ + 1;
+                            formatted = true;
                         }
                         break;
                     }
@@ -452,7 +528,7 @@ function createMessage(message)
 
     var contentElem = document.createElement('td');
     contentElem.className = 'content';
-    contentElem.innerHTML = formatMessageContent(message.content);
+    contentElem.innerHTML = formatMessageContent(message, message.content);
 
     // Display attachments
     if (message.attachments != null)
@@ -464,7 +540,7 @@ function createMessage(message)
             var nameAndExt = filename.split('.');
             var ext = nameAndExt[nameAndExt.length - 1]
 
-            switch (ext)
+            switch (ext.toLowerCase())
             {
             case 'png':
             case 'jpg':
@@ -486,6 +562,8 @@ function createMessage(message)
             }
             else  // Display an inline media element
             {
+                if (tagName == 'video')
+                    elem.controls = '';
                 elem.src = message.attachments[i].url;
             }
             elem.className = 'attachment';
@@ -560,6 +638,7 @@ function openChannel(channelId)
     idChannelHeader.innerHTML = escapeHtml(guild.name) + ' / #' + escapeHtml(channel.name);
     idMessageList.innerHTML = '';
     idLoadMsgsBtn.style.display = '';
+    currentGuild = guild;
     currentChannel = channel;
     loadMessages();
     idMessageList.parentElement.scrollTop = idMessageList.parentElement.scrollHeight;

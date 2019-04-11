@@ -10,7 +10,7 @@
 /* Set default font */
 body {
     font-family: sans-serif;
-    font-size: 16px;
+    font-size: 12pt;
     background-color: #CCD;
 }
 
@@ -58,24 +58,30 @@ html, body {
 }
 
 /* An invisible box that covers the screen, blocking user input */
-#idModalContainer {
+div.modal-container {
     position: fixed;
     left: 0px;
     top: 0px;
     width: 100%;
     height: 100%;
-    display: none;
+    background-color: rgba(128, 128, 128, 0.5);
 }
 
 .popup {
-    padding: 10px;
+    position: fixed;
+    top: 0px;
+    left: 0px;
+    right: 0px;
     width: 300px;
     margin-left: auto;
     margin-right: auto;
+    padding: 10px;
     border: 1px solid black;
     box-shadow: 0px 0px 8px #888;
     background-color: white;
-    display: none;
+}
+.popup p {
+    font-size: 10pt;
 }
 
 /* Tree list elements */
@@ -93,7 +99,7 @@ tr.message {
 td.timestamp {
     width: 80px;
     color: #888;
-    font-size: 8px;
+    font-size: 8pt;
 }
 td.username {
     font-weight: bold;
@@ -125,11 +131,12 @@ img.attachment, video.attachment {
 
             <!-- Toolbar -->
             <div class="top-panel" style="height:32px;padding:2px;border-bottom:1px solid black">
-                <button id="idLogInBtn" onclick="openPopup('idLoginDlg')">Log In</button>
+                <button id="idLogInBtn" onclick="showElement('idLoginDlg')">Log In</button>
                 <span id="idSessionControls" style="display:none">
                     <span id="idUsername" style="font-weight:bold"></span>
                     <button onclick="logOut()">Log Out</button>
                 </span>
+                <button onclick="showElement('idAboutDlg')" style="float:right">About Drocsid</button>
             </div>
 
             <div class="flexbox" style="padding-left:200px">
@@ -160,8 +167,8 @@ img.attachment, video.attachment {
         </div>
 
         <!-- Login Dialog -->
-        <div id="idModalContainer">
-            <div id="idLoginDlg" class="popup">
+        <div id="idLoginDlg" class="modal-container">
+            <div class="popup">
                 <h2>Log in to Discord</h2>
                 <hr>
                 <form onsubmit="submitLogin();return false">
@@ -185,10 +192,38 @@ img.attachment, video.attachment {
                             </tr>
                         </tbody>
                     </table>
+                    <p>
+                        Please read the following
+                        <a href=# onclick="showElement('idAboutDlg');return false">information</a>
+                        before logging in.
+                    </p>
                     <input id="idLoginSubmitBtn" type="submit" value="Log In">
-                    <button id="idLoginCancelBtn" onclick="closePopup('idLoginDlg');return false">Cancel</button>
+                    <button id="idLoginCancelBtn" onclick="hideElement('idLoginDlg');return false">Cancel</button>
                 </form>
             </div>
+        </div>
+
+        <!-- About Dialog -->
+        <div id="idAboutDlg" class="popup" style="display:none">
+            <h2>About Drocsid</h2>
+            <hr>
+            <p>
+                Drocsid is a simple, text-only Discord client designed to be
+                usable on older or slower computers. It uses basic HTML and
+                JavaScript and does not rely on heavy frameworks such as
+                React.js.
+            </p>
+            <p>
+                USE AT YOUR OWN RISK. I am not responsible for anything that
+                happens to you or your Discord account as a result of using
+                this unofficial client.
+            </p>
+            <p>
+                See the
+                <a href="https://github.com/camthesaxman/drocsid">GitHub Repository</a>
+                to report bugs or browse the source code.
+            </p>
+            <button onclick="hideElement('idAboutDlg')">OK</button>
         </div>
     </body>
     <script>
@@ -202,20 +237,15 @@ var userGuilds = null;
 var currentGuild = null;
 var currentChannel = null;
 
-// Opens a popup
-function openPopup(id)
+function showElement(id)
 {
-    idModalContainer.style.display = 'block';
-    document.getElementById(id).style.display = 'block';
+    document.getElementById(id).style.display = '';
 }
 
-// Closes a popup
-function closePopup(id)
+function hideElement(id)
 {
-    idModalContainer.style.display = 'none';
     document.getElementById(id).style.display = 'none';
 }
-
 
 // Escapes HTML characters in a string so that it can be
 // safely inserted as text into an element
@@ -299,9 +329,9 @@ function submitLogin()
     {
         // Successful
         userToken = response.token;
-        idLogInBtn.style.display = 'none';
-        idSessionControls.style.display = '';
-        closePopup('idLoginDlg');
+        hideElement('idLogInBtn');
+        showElement('idSessionControls');
+        hideElement('idLoginDlg');
         initConnection();
     }
     else
@@ -313,16 +343,7 @@ function submitLogin()
 
 function logOut()
 {
-    ws.close();
-    apiToken = null;
-    currentGuild = null;
-    currentChannel = null;
-    idSessionControls.style.display = 'none';
-    idLogInBtn.style.display = '';
-    idChannelList.innerHTML = '';
-    idMessageList.innerHTML = '';
-    idChannelHeader.innerHTML = '';
-    idLoadMsgsBtn.style.display = 'none';
+    window.location.reload();
 }
 
 function sendMessage()
@@ -350,8 +371,6 @@ function sendMessage()
 // Parses message content and returns the HTML formatted version
 function formatMessageContent(message, text)
 {
-    //console.log(JSON.stringify(message));
-
     // formats a <> reference to a user, channel, role, or emoji.
     // returns null if reference is not valid
     function formatReference(str)
@@ -637,7 +656,7 @@ function openChannel(channelId)
 
     idChannelHeader.innerHTML = escapeHtml(guild.name) + ' / #' + escapeHtml(channel.name);
     idMessageList.innerHTML = '';
-    idLoadMsgsBtn.style.display = '';
+    showElement('idLoadMsgsBtn');
     currentGuild = guild;
     currentChannel = channel;
     loadMessages();
@@ -726,7 +745,7 @@ function initConnection()
                 if (currentChannel != null && payload.d.channel_id == currentChannel.id)
                 {
                     idMessageList.appendChild(createMessage(payload.d));
-                    idMessageList.parentElement.scrollTop = idMessageList.parentElement.scrollHeight;
+                    //idMessageList.parentElement.scrollTop = idMessageList.parentElement.scrollHeight;
                 }
                 break;
             }
